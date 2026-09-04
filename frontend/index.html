@@ -13,15 +13,19 @@
     --bg:#0f172a; --card:#1e293b; --border:#334155; --text:#f1f5f9; --muted:#94a3b8;
   }
   *{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);transition:background .2s,color .2s}
-  .layout{display:flex;min-height:100vh}
-  .sidebar{width:230px;background:var(--card);border-right:1px solid var(--border);padding:24px 14px;display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+  html{height:100%}
+  body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);transition:background .2s,color .2s}
+  .layout{display:flex;height:100vh}
+  .sidebar{width:230px;background:var(--card);border-right:1px solid var(--border);padding:24px 14px;display:flex;flex-direction:column;gap:6px;flex-shrink:0;overflow-y:auto}
   .brand{display:flex;align-items:center;gap:10px;padding:0 10px 22px 10px;font-weight:700;font-size:18px}
   .brand .dot{width:34px;height:34px;border-radius:10px;background:var(--purple);display:flex;align-items:center;justify-content:center;color:#fff}
   .navitem{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;cursor:pointer;color:var(--muted);font-size:14px;font-weight:500}
   .navitem:hover{background:color-mix(in srgb, var(--purple) 8%, transparent)}
   .navitem.active{background:var(--purple);color:#fff}
-  .main{flex:1;padding:32px 40px 120px 40px;position:relative;min-width:0}
+  .main{flex:1;padding:32px 40px 120px 40px;position:relative;min-width:0;height:100vh;overflow-y:auto}
+  .page-header{position:sticky;top:0;z-index:5;background:var(--bg);margin:-32px -40px 20px -40px;padding:28px 40px 16px 40px;box-shadow:0 1px 0 var(--border)}
+  .page-header h1{margin:0 0 4px 0}
+  .page-header .sub{margin:0}
   .topbar{display:flex;justify-content:flex-end;margin-bottom:8px}
   .theme-toggle{background:var(--card);border:1px solid var(--border);border-radius:10px;width:40px;height:40px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text)}
   .theme-toggle:hover{background:color-mix(in srgb, var(--purple) 10%, var(--card))}
@@ -128,8 +132,11 @@
 
     <!-- TTS TAB -->
     <div class="tab-section active" id="tab-tts">
-      <h1>Đọc văn bản</h1>
-      <p class="sub">Chuyển văn bản thành giọng nói bằng OmniVoice, chạy local trên Colab.</p>
+      <div class="page-header">
+        <h1>Đọc văn bản</h1>
+        <p class="sub">Chuyển văn bản thành giọng nói bằng OmniVoice, chạy local trên Colab.</p>
+      </div>
+
 
       <div class="tts-columns">
         <div class="tts-left">
@@ -174,8 +181,10 @@
 
     <!-- LIBRARY TAB -->
     <div class="tab-section" id="tab-library">
-      <h1>Thư viện giọng nói</h1>
-      <p class="sub">Toàn bộ giọng bạn đã lưu — dùng lại ở tab "Đọc văn bản" hoặc xoá nếu không cần nữa. <span class="refresh-link" onclick="loadVoices()">Làm mới</span></p>
+      <div class="page-header">
+        <h1>Thư viện giọng nói</h1>
+        <p class="sub">Toàn bộ giọng bạn đã lưu — dùng lại ở tab "Đọc văn bản" hoặc xoá nếu không cần nữa. <span class="refresh-link" onclick="loadVoices()">Làm mới</span></p>
+      </div>
       <div class="card">
         <div id="voiceList"><div class="empty">Chưa có giọng nào — sang tab "Giọng nói của bạn" để tạo giọng đầu tiên.</div></div>
       </div>
@@ -183,8 +192,10 @@
 
     <!-- VOICES TAB (create/record) -->
     <div class="tab-section" id="tab-voices">
-      <h1>Giọng nói của bạn</h1>
-      <p class="sub">Ghi âm hoặc upload một đoạn mẫu (3–10 giây) để nhân bản giọng — giọng lưu xong sẽ hiện ở tab "Thư viện giọng nói".</p>
+      <div class="page-header">
+        <h1>Giọng nói của bạn</h1>
+        <p class="sub">Ghi âm hoặc upload một đoạn mẫu (3–10 giây) để nhân bản giọng — giọng lưu xong sẽ hiện ở tab "Thư viện giọng nói".</p>
+      </div>
       <div class="card">
         <label>Tên giọng nói</label>
         <input type="text" id="voiceName" placeholder="VD: Giọng của tôi" maxlength="80">
@@ -204,8 +215,10 @@
 
     <!-- HISTORY TAB -->
     <div class="tab-section" id="tab-history">
-      <h1>Lịch sử</h1>
-      <p class="sub">Các đoạn đã tạo trong phiên làm việc này (mất khi tải lại trang hoặc Colab ngắt session).</p>
+      <div class="page-header">
+        <h1>Lịch sử</h1>
+        <p class="sub">Các đoạn đã tạo trong phiên làm việc này (mất khi tải lại trang hoặc Colab ngắt session).</p>
+      </div>
       <div class="card">
         <div id="historyList"><div class="empty">Chưa có lịch sử nào.</div></div>
       </div>

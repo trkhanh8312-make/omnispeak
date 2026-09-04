@@ -13,10 +13,10 @@
     --bg:#0f172a; --card:#1e293b; --border:#334155; --text:#f1f5f9; --muted:#94a3b8;
   }
   *{box-sizing:border-box}
-  html{height:100%}
-  body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);transition:background .2s,color .2s}
-  .layout{display:flex;height:100vh}
-  .sidebar{width:230px;background:var(--card);border-right:1px solid var(--border);padding:24px 14px;display:flex;flex-direction:column;gap:6px;flex-shrink:0;overflow-y:auto}
+  html{height:100%;overflow:hidden}
+  body{margin:0;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);transition:background .2s,color .2s}
+  .layout{display:flex;height:100vh;overflow:hidden}
+  .sidebar{width:230px;background:var(--card);border-right:1px solid var(--border);padding:24px 14px;display:flex;flex-direction:column;gap:6px;flex-shrink:0;overflow:hidden}
   .brand{display:flex;align-items:center;gap:10px;padding:0 10px 22px 10px;font-weight:700;font-size:18px}
   .brand .dot{width:34px;height:34px;border-radius:10px;background:var(--purple);display:flex;align-items:center;justify-content:center;color:#fff}
   .navitem{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;cursor:pointer;color:var(--muted);font-size:14px;font-weight:500}
@@ -28,6 +28,18 @@
   .tab-header h1{margin:0 0 4px 0}
   .tab-header .sub{margin:0}
   .tab-body{flex:1;min-height:0;overflow-y:auto;padding:20px 40px 120px 40px}
+
+  /* --- Ẩn thanh cuộn (vẫn cuộn được bằng chuột/cảm ứng, chỉ ẩn thanh) --- */
+  html, body, .sidebar, .tab-body, textarea, #voicePickerList, #historyPanelList{
+    scrollbar-width:none;        /* Firefox */
+    -ms-overflow-style:none;     /* IE / old Edge */
+  }
+  html::-webkit-scrollbar, body::-webkit-scrollbar,
+  .sidebar::-webkit-scrollbar, .tab-body::-webkit-scrollbar,
+  textarea::-webkit-scrollbar,
+  #voicePickerList::-webkit-scrollbar, #historyPanelList::-webkit-scrollbar{
+    width:0; height:0; display:none; background:transparent;
+  }
   .theme-toggle{background:var(--card);border:1px solid var(--border);border-radius:10px;width:40px;height:40px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text)}
   .theme-toggle:hover{background:color-mix(in srgb, var(--purple) 10%, var(--card))}
   h1{font-size:24px;margin:0 0 4px 0}
@@ -67,10 +79,27 @@
   .counts{color:var(--muted);font-size:12px}
 
   /* --- TTS two-column layout --- */
-  .tts-columns{display:flex;gap:18px;align-items:flex-start}
+  .tts-columns{display:flex;gap:18px}
   .tts-left{flex:1;min-width:0}
   .tts-right{width:320px;flex-shrink:0}
   @media (max-width:900px){ .tts-columns{flex-direction:column} .tts-right{width:100%} }
+
+  /* --- Tab "Đọc văn bản": khung viền (tiêu đề, thanh tab, ô tìm kiếm) đứng yên,
+         chỉ nội dung bên trong (ô văn bản / danh sách giọng / lịch sử) mới cuộn --- */
+  #tab-tts .tab-body{display:flex;flex-direction:column;overflow:hidden}
+  #tab-tts .tts-columns{flex:1;min-height:0;align-items:stretch}
+  #tab-tts .tts-left{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  #tab-tts .tts-left .card{display:flex;flex-direction:column;min-height:0;height:100%}
+  #tab-tts .tts-left .card > label,
+  #tab-tts .tts-left .card > .row,
+  #tab-tts .tts-left .card > .status{flex-shrink:0}
+  #tab-tts #ttsText{flex:1;min-height:80px;max-height:none}
+  #tab-tts .tts-right{display:flex;flex-direction:column;min-height:0}
+  #tab-tts .tts-right .card{display:flex;flex-direction:column;min-height:0;height:100%}
+  #tab-tts .tts-right .segmented,
+  #tab-tts .tts-right .search-box{flex-shrink:0}
+  #rightPanel-voices, #rightPanel-history{flex-direction:column;min-height:0;flex:1}
+  #voicePickerList, #historyPanelList{flex:1;min-height:0;overflow-y:auto}
 
   /* --- Segmented tabs (Giọng nói / Lịch sử) --- */
   .segmented{display:flex;background:color-mix(in srgb, var(--muted) 12%, transparent);border-radius:10px;padding:4px;margin-bottom:14px}
@@ -322,8 +351,8 @@ document.querySelectorAll('.navitem').forEach(el => {
 function switchRightTab(tab) {
   document.getElementById('segVoices').classList.toggle('active', tab === 'voices');
   document.getElementById('segHistory').classList.toggle('active', tab === 'history');
-  document.getElementById('rightPanel-voices').style.display = tab === 'voices' ? 'block' : 'none';
-  document.getElementById('rightPanel-history').style.display = tab === 'history' ? 'block' : 'none';
+  document.getElementById('rightPanel-voices').style.display = tab === 'voices' ? 'flex' : 'none';
+  document.getElementById('rightPanel-history').style.display = tab === 'history' ? 'flex' : 'none';
 }
 
 function setStatus(id, msg, cls) {

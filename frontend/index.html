@@ -250,6 +250,30 @@
 
 <script>
 const BASE = window.location.origin;
+
+// ---- Mật khẩu bảo vệ API (đặt cùng giá trị trong Colab Secrets: OMNISPEAK_SECRET) ----
+// Chỉ hỏi 1 lần đầu trên mỗi trình duyệt, sau đó lưu ở localStorage cho các lần mở lại sau.
+let APP_KEY = localStorage.getItem('omnispeak_key') || '';
+function ensureKey() {
+  if (!APP_KEY) {
+    APP_KEY = window.prompt('Nhập mật khẩu truy cập OmniSpeak:') || '';
+    localStorage.setItem('omnispeak_key', APP_KEY);
+  }
+}
+async function apiFetch(url, options = {}) {
+  ensureKey();
+  const doFetch = () => fetch(url, { ...options, headers: { ...(options.headers || {}), 'X-Omnispeak-Key': APP_KEY } });
+  let res = await doFetch();
+  if (res.status === 401) {
+    alert('Sai mật khẩu hoặc mật khẩu đã đổi — nhập lại.');
+    localStorage.removeItem('omnispeak_key');
+    APP_KEY = window.prompt('Nhập mật khẩu truy cập OmniSpeak:') || '';
+    localStorage.setItem('omnispeak_key', APP_KEY);
+    res = await doFetch();
+  }
+  return res;
+}
+
 let mediaRecorder, recordedChunks = [], recordedBlob = null, isRecording = false;
 let historyItems = [];
 let allProfiles = [];
@@ -353,7 +377,7 @@ function makeFilename(text, ext) {
 // ---- Load saved voice profiles ----
 async function loadVoices() {
   try {
-    const r = await fetch(BASE + '/profiles');
+    const r = await apiFetch(BASE + '/profiles');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     allProfiles = await r.json();
 
@@ -421,7 +445,7 @@ function renderVoicePicker() {
 const libPreviewAudio = document.getElementById('libPreviewAudio');
 let previewingId = null;
 
-function previewVoice(id, btnEl, event) {
+async function previewVoice(id, btnEl, event) {
   if (event) event.stopPropagation();
   const isSameAndPlaying = previewingId === id && !libPreviewAudio.paused;
   document.querySelectorAll('.preview-btn.playing, .play-ic.playing').forEach(el => el.classList.remove('playing'));
@@ -430,13 +454,17 @@ function previewVoice(id, btnEl, event) {
   if (isSameAndPlaying) { previewingId = null; return; }
 
   previewingId = id;
-  libPreviewAudio.src = BASE + '/profiles/' + id + '/preview';
-  libPreviewAudio.play().then(() => {
+  try {
+    const r = await apiFetch(BASE + '/profiles/' + id + '/preview');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    libPreviewAudio.src = URL.createObjectURL(blob);
+    await libPreviewAudio.play();
     if (btnEl) btnEl.classList.add('playing');
-  }).catch(() => {
+  } catch (e) {
     previewingId = null;
     alert('Giọng này chưa có bản nghe thử (được tạo trước khi có tính năng này).');
-  });
+  }
 }
 libPreviewAudio.addEventListener('ended', () => {
   document.querySelectorAll('.preview-btn.playing, .play-ic.playing').forEach(el => el.classList.remove('playing'));
@@ -461,7 +489,7 @@ async function deleteVoice(id, btnEl) {
   if (!confirm('Xoá giọng nói này khỏi thư viện?')) return;
   btnEl.disabled = true;
   try {
-    const r = await fetch(BASE + '/profiles/' + id, { method: 'DELETE' });
+    const r = await apiFetch(BASE + '/profiles/' + id, { method: 'DELETE' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     loadVoices();
   } catch (e) {
@@ -523,7 +551,7 @@ async function saveVoiceProfile() {
     fd.append('name', name);
     fd.append('kind', 'clone');
     fd.append('ref_audio', recordedBlob, 'reference.wav');
-    const r = await fetch(BASE + '/profiles', { method: 'POST', body: fd });
+    const r = await apiFetch(BASE + '/profiles', { method: 'POST', body: fd });
     if (!r.ok) throw new Error(await extractErrorMessage(r));
     setStatus('voiceStatus', 'Đã lưu giọng "' + name + '" vào thư viện.', 'ok');
     document.getElementById('voiceName').value = '';
@@ -553,14 +581,14 @@ async function generateTTS() {
     const fd = new FormData();
     fd.append('text', text);
     if (selectedProfileId) fd.append('profile_id', selectedProfileId);
-    const r = await fetch(BASE + '/generate', { method: 'POST', body: fd });
+    const r = await apiFetch(BASE + '/generate', { method: 'POST', body: fd });
     if (!r.ok) throw new Error(await extractErrorMessage(r));
     const { job_id, total_chunks } = await r.json();
 
     // Poll trạng thái tới khi xong
     let status = null;
     while (true) {
-      const sr = await fetch(BASE + '/generate/' + job_id + '/status');
+      const sr = await apiFetch(BASE + '/generate/' + job_id + '/status');
       if (!sr.ok) throw new Error('HTTP ' + sr.status);
       status = await sr.json();
       if (status.status === 'done' || status.status === 'error') break;
@@ -571,7 +599,7 @@ async function generateTTS() {
     }
     if (status.status === 'error') throw new Error(status.error || 'Lỗi không xác định');
 
-    const ar = await fetch(BASE + '/generate/' + job_id + '/audio');
+    const ar = await apiFetch(BASE + '/generate/' + job_id + '/audio');
     if (!ar.ok) throw new Error('HTTP ' + ar.status);
     const blob = await ar.blob();
     const url = URL.createObjectURL(blob);

@@ -33,6 +33,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("omnispeak")
 
+# Buộc các phép toán GPU (cuBLAS/cuDNN) luôn chọn cùng 1 thuật toán giữa các lần chạy.
+# torch.manual_seed() một mình không chặn được kiểu sai lệch cực nhỏ này — đây là lớp
+# bảo hiểm thêm, không phụ thuộc gì vào nội bộ model. warn_only=True để không làm crash
+# nếu có phép toán nào chưa hỗ trợ chế độ xác định, chỉ cảnh báo trong log.
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+try:
+    torch.use_deterministic_algorithms(True, warn_only=True)
+except Exception as e:
+    logger.warning(f"Không bật được use_deterministic_algorithms: {e}")
+
 # Giới hạn văn bản: người dùng thường dùng ~1000-2000 từ, chặn cứng ở 3000 từ.
 HARD_WORD_LIMIT = 3000
 CHUNK_MAX_CHARS = 400  # mỗi lần gọi model.generate() xử lý tối đa ~400 ký tự

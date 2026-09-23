@@ -1,39 +1,43 @@
-# OmniSpeak
+# OmniSpeak (Colab)
 
-App đọc văn bản và nhân bản giọng nói (Việt/Anh), chạy trên Google Colab, dùng model [OmniVoice](https://github.com/k2-fsa/OmniVoice) (`k2-fsa/OmniVoice`, Apache-2.0).
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/trkhanh8312-make/omnispeak/blob/main/omnispeak.ipynb)
+Đọc văn bản (TTS) và nhân bản giọng nói, chạy trên Google Colab (T4 GPU), dùng model [OmniVoice](https://github.com/k2-fsa/OmniVoice) (`k2-fsa/OmniVoice`, Apache-2.0).
 
 ## Cấu trúc repo
 
-```
-omnispeak/
-├── omnispeak.ipynb        # notebook chạy trên Google Colab
-├── frontend/
-│   └── index.html         # giao diện web
-└── backend/
-    └── backend.py         # FastAPI backend gọi thẳng OmniVoice
-```
+- `frontend/` — giao diện web
+  - `index.html` — khung giao diện
+  - `style.css` — toàn bộ CSS
+  - `app.js` — toàn bộ logic JS (gọi API, ghi âm, phát lại...)
+- `backend/` — server xử lý
+  - `backend.py` — FastAPI server: TTS, thư viện giọng, lịch sử
+  - `requirements.txt` — danh sách package cần cài
+- `scripts/` — các bước chạy trong Colab, tách riêng để notebook gọn
+  - `colab_utils.py` — tiện ích dùng chung (chạy lệnh, báo lỗi)
+  - `install_deps.py` — cài apt + pip package
+  - `download_model.py` — tải trước model OmniVoice
+  - `start_backend.py` — khởi động uvicorn, theo dõi health
+- `.github/workflows/` — kiểm tra tự động khi commit (JSON notebook, cú pháp Python)
+- `omnispeak.ipynb` — notebook chạy trên Colab, chỉ đồng bộ code rồi gọi các script trên
 
-Notebook không nhúng code app — mỗi lần chạy sẽ `git clone`/`git pull` toàn bộ repo này về Colab rồi chạy trực tiếp từ đó.
+Notebook không nhúng code app — mọi logic nằm trên GitHub, notebook chỉ `git clone`/`git pull` code mới nhất về rồi gọi.
 
 ## Cách chạy
 
-1. Mở `omnispeak.ipynb` trên Google Colab (bấm badge phía trên).
+1. Mở `omnispeak.ipynb` bằng Google Colab.
 2. `Runtime → Change runtime type → T4 GPU`.
-3. Chạy lần lượt các cell từ trên xuống. Mọi cell đều an toàn khi chạy lại.
-4. Cell cuối cùng ("Mở giao diện web") sẽ mở tab giao diện để dùng.
+3. Chạy các cell theo thứ tự từ trên xuống (hoặc `Runtime → Run all`).
+4. Cell 2 có form để chỉnh `GITHUB_USER` / `GITHUB_REPO` / `GITHUB_BRANCH` nếu bạn dùng bản fork riêng.
+5. Cell 4 (mount Google Drive) là tuỳ chọn — bật lên nếu muốn giữ giọng nói + cache model qua các phiên sau. Mỗi phiên chạy mới, Google sẽ hỏi quyền truy cập Drive lại — đây là giới hạn bảo mật của Colab, không có cách bỏ qua.
+6. Cell 7 mở giao diện web.
 
-## Sửa code / cập nhật
+## Bảo mật
 
-1. Sửa `frontend/index.html` hoặc `backend/backend.py` → commit & push lên GitHub.
-2. Trong notebook đang chạy: chạy lại cell **"Lấy code"** (đồng bộ code mới nhất từ repo), rồi cell **"Khởi động backend"** — `FORCE_RESTART = True` sẽ tự nạp code mới, không cần tự kill process hay khởi động lại Colab.
+Giao diện được bảo vệ bằng mật khẩu qua header `X-Omnispeak-Key`. Đặt mật khẩu trong Colab Secrets với tên `OMNISPEAK_SECRET`. Trình duyệt sẽ hỏi mật khẩu 1 lần đầu rồi lưu lại (`localStorage`) cho các lần mở sau.
 
-## Lưu dữ liệu lâu dài
+## Xử lý sự cố
 
-Nếu muốn giữ giọng nói đã nhân bản và cache model qua các phiên Colab sau, chạy cell **"Mount Google Drive"** trước cell tải model — dữ liệu sẽ lưu vào `MyDrive/omnispeak_data` và `MyDrive/omnispeak_hf_cache`.
+Xem mục "Xử lý sự cố" ở cuối `omnispeak.ipynb`.
 
-## Model & License
+## Giấy phép
 
-- Model: [OmniVoice](https://github.com/k2-fsa/OmniVoice) — `k2-fsa/OmniVoice`, giấy phép Apache-2.0.
-- Backend: FastAPI, gọi thẳng OmniVoice, không qua thư viện app trung gian nào khác.
+Xem [LICENSE](LICENSE). Model OmniVoice thuộc giấy phép Apache-2.0 riêng — xem [repo gốc](https://github.com/k2-fsa/OmniVoice).

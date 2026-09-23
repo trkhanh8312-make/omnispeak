@@ -1,0 +1,49 @@
+name: Validate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Kiểm tra notebook .ipynb là JSON hợp lệ
+        run: |
+          python -c "
+          import json, glob, sys
+          ok = True
+          for path in glob.glob('**/*.ipynb', recursive=True):
+              try:
+                  with open(path, encoding='utf-8') as f:
+                      json.load(f)
+                  print(f'OK  {path}')
+              except Exception as e:
+                  print(f'LỖI {path}: {e}')
+                  ok = False
+          sys.exit(0 if ok else 1)
+          "
+
+      - name: Kiểm tra cú pháp các file Python
+        run: |
+          python -c "
+          import py_compile, glob, sys
+          ok = True
+          for path in glob.glob('**/*.py', recursive=True):
+              try:
+                  py_compile.compile(path, doraise=True)
+                  print(f'OK  {path}')
+              except Exception as e:
+                  print(f'LỖI {path}: {e}')
+                  ok = False
+          sys.exit(0 if ok else 1)
+          "

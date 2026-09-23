@@ -1,3 +1,4 @@
+import inspect
 import io
 import json
 import logging
@@ -70,6 +71,35 @@ logger.info(f"Đang tải model OmniVoice lên {device}...")
 MODEL = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device_map=device, dtype=dtype, load_asr=True)
 logger.info("Model đã sẵn sàng.")
 
+# ---- Cố định giọng đọc giữa các lần gọi ----
+# Không có seed, model lấy mẫu ngẫu nhiên khác nhau mỗi lần -> cùng văn bản + cùng giọng
+# nhưng ngữ điệu/âm sắc vẫn trôi giữa các lần đọc. Chỉ truyền các tham số mà phiên bản
+# omnivoice đang cài thực sự hỗ trợ (kiểm tra qua chữ ký hàm), tránh lỗi nếu phiên bản
+# khác không có tham số này.
+_GENERATE_PARAMS = set(inspect.signature(MODEL.generate).parameters)
+GEN_SEED = int(os.environ.get("OMNISPEAK_SEED", "42"))
+if {"seed", "class_temperature", "position_temperature"} & _GENERATE_PARAMS:
+    logger.info(f"Model hỗ trợ cố định giọng đọc (seed={GEN_SEED}).")
+else:
+    logger.warning(
+        "Phiên bản omnivoice đang cài không có tham số seed/temperature ở generate() "
+        "— giọng đọc có thể vẫn đổi nhẹ giữa các lần."
+    )
+
+
+def _deterministic_kwargs():
+    """Trả về các tham số giúp generate() ra kết quả giống nhau giữa các lần gọi
+    (cùng văn bản + cùng giọng), chỉ gồm những tham số model hiện tại hỗ trợ."""
+    extra = {}
+    if "seed" in _GENERATE_PARAMS:
+        extra["seed"] = GEN_SEED
+    if "class_temperature" in _GENERATE_PARAMS:
+        extra["class_temperature"] = 0.0
+    if "position_temperature" in _GENERATE_PARAMS:
+        extra["position_temperature"] = 0.0
+    return extra
+
+
 GEN_LOCK = threading.Lock()  # chỉ chạy 1 job trên GPU tại một thời điểm
 JOBS: dict = {}  # job_id -> {status, total, done, audio_bytes, gen_time, error, created}
 
@@ -141,7 +171,7 @@ def _run_job(job_id: str, text: str, profile_id: Optional[str]):
     job["status"] = "running"
     logger.info(f"[{job_id}] Bắt đầu tạo giọng nói — {len(text)} ký tự, profile={profile_id or 'mặc định'}")
     try:
-        kwargs = {}
+        kwargs = _deterministic_kwargs()
         if profile_id:
             p = PROFILES_DIR / f"{profile_id}.pt"
             if not p.exists():

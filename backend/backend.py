@@ -73,23 +73,24 @@ logger.info("Model đã sẵn sàng.")
 
 # ---- Cố định giọng đọc giữa các lần gọi ----
 # Không có seed, model lấy mẫu ngẫu nhiên khác nhau mỗi lần -> cùng văn bản + cùng giọng
-# nhưng ngữ điệu/âm sắc vẫn trôi giữa các lần đọc. Chỉ truyền các tham số mà phiên bản
-# omnivoice đang cài thực sự hỗ trợ (kiểm tra qua chữ ký hàm), tránh lỗi nếu phiên bản
-# khác không có tham số này.
+# nhưng ngữ điệu/âm sắc vẫn trôi giữa các lần đọc. Ưu tiên truyền seed/temperature thẳng
+# vào generate() nếu phiên bản omnivoice đang cài hỗ trợ (kiểm tra qua chữ ký hàm); nếu
+# không hỗ trợ, luôn tự đặt lại RNG toàn cục (torch/numpy) ngay trước mỗi lần gọi làm
+# phương án dự phòng — không phụ thuộc việc thư viện có tham số riêng hay không.
 _GENERATE_PARAMS = set(inspect.signature(MODEL.generate).parameters)
 GEN_SEED = int(os.environ.get("OMNISPEAK_SEED", "42"))
-if {"seed", "class_temperature", "position_temperature"} & _GENERATE_PARAMS:
-    logger.info(f"Model hỗ trợ cố định giọng đọc (seed={GEN_SEED}).")
+_SUPPORTS_SEED_KWARGS = bool({"seed", "class_temperature", "position_temperature"} & _GENERATE_PARAMS)
+if _SUPPORTS_SEED_KWARGS:
+    logger.info(f"Model hỗ trợ tham số seed/temperature — dùng seed={GEN_SEED}.")
 else:
     logger.warning(
         "Phiên bản omnivoice đang cài không có tham số seed/temperature ở generate() "
-        "— giọng đọc có thể vẫn đổi nhẹ giữa các lần."
+        f"— chuyển sang tự đặt lại RNG (torch.manual_seed={GEN_SEED}) trước mỗi lần gọi."
     )
 
 
 def _deterministic_kwargs():
-    """Trả về các tham số giúp generate() ra kết quả giống nhau giữa các lần gọi
-    (cùng văn bản + cùng giọng), chỉ gồm những tham số model hiện tại hỗ trợ."""
+    """Tham số truyền trực tiếp vào generate(), chỉ gồm những cái model hiện tại hỗ trợ."""
     extra = {}
     if "seed" in _GENERATE_PARAMS:
         extra["seed"] = GEN_SEED
@@ -98,6 +99,15 @@ def _deterministic_kwargs():
     if "position_temperature" in _GENERATE_PARAMS:
         extra["position_temperature"] = 0.0
     return extra
+
+
+def _reseed_rng():
+    """Phương án dự phòng khi model không có tham số seed riêng: tự đặt lại RNG toàn
+    cục ngay trước mỗi lần generate(), để cùng văn bản + cùng giọng luôn ra cùng kết quả."""
+    torch.manual_seed(GEN_SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(GEN_SEED)
+    np.random.seed(GEN_SEED)
 
 
 GEN_LOCK = threading.Lock()  # chỉ chạy 1 job trên GPU tại một thời điểm
@@ -187,6 +197,7 @@ def _run_job(job_id: str, text: str, profile_id: Optional[str]):
 
         with GEN_LOCK:
             for i, chunk in enumerate(chunks):
+                _reseed_rng()
                 audio = MODEL.generate(text=chunk, **kwargs)
                 wav = audio[0]
                 if isinstance(wav, torch.Tensor):

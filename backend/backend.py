@@ -195,7 +195,7 @@ def _run_job(job_id: str, text: str, profile_id: Optional[str]):
         pieces = []
         gap = np.zeros(int(GAP_SECONDS * SR), dtype=np.float32)
 
-              with GEN_LOCK:
+        with GEN_LOCK:
             _reseed_rng()  # chỉ reseed 1 lần đầu bài — để các đoạn trong cùng bài chảy liền mạch tự nhiên
             for i, chunk in enumerate(chunks):
                 audio = MODEL.generate(text=chunk, **kwargs)

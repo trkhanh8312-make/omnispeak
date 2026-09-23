@@ -28,6 +28,7 @@ let historyItems = [];
 let allProfiles = [];
 let selectedProfileId = "";
 let selectedProfileName = "Mặc định";
+let lastGeneratedKey = null;  // text + '||' + profileId của lần đọc gần nhất thành công
 
 // ---- Giới hạn độ dài văn bản ----
 const SOFT_WORD_LIMIT = 2000;  // vẫn tạo được, chỉ cảnh báo sẽ xử lý theo từng đoạn + mất thời gian
@@ -103,14 +104,33 @@ function updateCounts() {
     warnEl.textContent = `Văn bản vượt quá giới hạn ${HARD_WORD_LIMIT} từ (hiện tại: ${words} từ) — vui lòng rút ngắn bớt.`;
     warnEl.className = 'status err';
     genBtn.disabled = true;
+    genBtn.textContent = '▷ Tạo giọng đọc';
+    genBtn.title = '';
+    return;
   } else if (words > SOFT_WORD_LIMIT) {
     warnEl.textContent = `Văn bản khá dài (${words} từ) — sẽ được xử lý theo từng đoạn nhỏ và có thể mất vài phút.`;
     warnEl.className = 'status warn';
-    genBtn.disabled = false;
   } else {
     warnEl.textContent = '';
     warnEl.className = 'status';
+  }
+  updateGenButtonState();
+}
+
+// ---- Chặn đọc lại đoạn văn + giọng chưa đổi so với lần đọc gần nhất ----
+function updateGenButtonState() {
+  const text = document.getElementById('ttsText').value.trim();
+  const genBtn = document.getElementById('genBtn');
+  const key = text + '||' + selectedProfileId;
+
+  if (text && lastGeneratedKey !== null && key === lastGeneratedKey) {
+    genBtn.disabled = true;
+    genBtn.textContent = '✓ Đã đọc xong';
+    genBtn.title = 'Đoạn văn này đã đọc rồi bằng giọng hiện tại — sửa nội dung hoặc đổi giọng để đọc lại.';
+  } else {
     genBtn.disabled = false;
+    genBtn.textContent = '▷ Tạo giọng đọc';
+    genBtn.title = '';
   }
 }
 
@@ -134,6 +154,7 @@ async function loadVoices() {
       selectedProfileId = "";
       selectedProfileName = "Mặc định";
       document.getElementById('selectedVoiceName').textContent = selectedProfileName;
+      updateGenButtonState();
     }
 
     renderVoicePicker();
@@ -225,6 +246,7 @@ function selectVoice(id, name) {
   selectedProfileName = name;
   document.getElementById('selectedVoiceName').textContent = name;
   renderVoicePicker();
+  updateGenButtonState();
 }
 
 function useVoice(id) {
@@ -358,10 +380,13 @@ async function generateTTS() {
     setStatus('ttsStatus', genTime ? `Xong trong ${genTime}s.` : 'Xong.', 'ok');
     showPlayer(url, filename, selectedProfileName, genTime);
     addHistory(text, selectedProfileName, url, filename, genTime);
+
+    // Đánh dấu đoạn văn + giọng này đã đọc — chặn đọc lại tới khi đổi nội dung hoặc giọng
+    lastGeneratedKey = text + '||' + selectedProfileId;
   } catch (e) {
     setStatus('ttsStatus', 'Tạo thất bại: ' + e.message, 'err');
   } finally {
-    btn.disabled = false;
+    updateGenButtonState();
   }
 }
 

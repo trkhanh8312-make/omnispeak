@@ -35,6 +35,10 @@ def start(app_dir, frontend_dir, data_dir=None, port=PORT,
         "OMNISPEAK_DATA_DIR", "/content/omnispeak_data")
     env["OMNISPEAK_FRONTEND_DIR"] = frontend_dir
     env["PYTHONUNBUFFERED"] = "1"
+    # Bắt buộc phải set trước khi tiến trình CUDA khởi tạo — dùng cùng backend.py's
+    # torch.use_deterministic_algorithms(True) để đảm bảo phép toán cuBLAS luôn ra
+    # cùng kết quả giữa các lần chạy (khớp seed cố định trong backend.py).
+    env.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
     # Mỗi lần backend thực sự khởi động lại (không phải chỉ kiểm tra health),
     # ghi log mới — tránh log cũ tích luỹ qua nhiều lần chạy lại cell trong cùng phiên.

@@ -1,4 +1,3 @@
-import inspect
 import io
 import json
 import logging
@@ -46,9 +45,12 @@ except Exception as e:
 
 # Giới hạn văn bản: người dùng thường dùng ~1000-2000 từ, chặn cứng ở 3000 từ.
 HARD_WORD_LIMIT = 3000
-CHUNK_MAX_CHARS = 400  # mỗi lần gọi model.generate() xử lý tối đa ~400 ký tự
 SR = 24000
-GAP_SECONDS = 0.25  # khoảng lặng chèn giữa các đoạn khi ghép lại
+# Văn bản dài: KHÔNG tự chia nhỏ ở tầng backend nữa — model OmniVoice đã có cơ chế
+# audio_chunk_duration/audio_chunk_threshold riêng để tự chia đoạn nội bộ khi cần,
+# và giữ liên tục phong cách giữa các đoạn tốt hơn nhiều so với việc mình tự cắt
+# theo câu rồi gọi generate() rời rạc từng đoạn (đó chính là nguyên nhân khiến
+# giọng đọc nghe khác tông giữa các phần của cùng 1 văn bản).
 
 # Giới hạn file mẫu giọng khi upload
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -83,38 +85,19 @@ MODEL = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device_map=device, dtype=d
 logger.info("Model đã sẵn sàng.")
 
 # ---- Cố định giọng đọc giữa các lần gọi ----
-# Không có seed, model lấy mẫu ngẫu nhiên khác nhau mỗi lần -> cùng văn bản + cùng giọng
-# nhưng ngữ điệu/âm sắc vẫn trôi giữa các lần đọc. Ưu tiên truyền seed/temperature thẳng
-# vào generate() nếu phiên bản omnivoice đang cài hỗ trợ (kiểm tra qua chữ ký hàm); nếu
-# không hỗ trợ, luôn tự đặt lại RNG toàn cục (torch/numpy) ngay trước mỗi lần gọi làm
-# phương án dự phòng — không phụ thuộc việc thư viện có tham số riêng hay không.
-_GENERATE_PARAMS = set(inspect.signature(MODEL.generate).parameters)
+# Đã xác nhận qua mã nguồn thật: OmniVoiceGenerationConfig không có tham số "seed" nào
+# cả — chỉ có class_temperature (mặc định 0.0, đã là greedy) và position_temperature
+# (mặc định 5.0, dùng nhiễu Gumbel — tác giả khuyến nghị giữ nguyên giá trị này để
+# không giảm chất lượng âm thanh). Vì vậy cách duy nhất để cố định kết quả là tự đặt
+# lại RNG toàn cục (torch/numpy) ngay trước mỗi lần gọi — đã test và xác nhận hoạt
+# động đúng (hash trùng khớp giữa các lần đọc cùng văn bản + cùng giọng).
 GEN_SEED = int(os.environ.get("OMNISPEAK_SEED", "42"))
-_SUPPORTS_SEED_KWARGS = bool({"seed", "class_temperature", "position_temperature"} & _GENERATE_PARAMS)
-if _SUPPORTS_SEED_KWARGS:
-    logger.info(f"Model hỗ trợ tham số seed/temperature — dùng seed={GEN_SEED}.")
-else:
-    logger.warning(
-        "Phiên bản omnivoice đang cài không có tham số seed/temperature ở generate() "
-        f"— chuyển sang tự đặt lại RNG (torch.manual_seed={GEN_SEED}) trước mỗi lần gọi."
-    )
-
-
-def _deterministic_kwargs():
-    """Tham số truyền trực tiếp vào generate(), chỉ gồm những cái model hiện tại hỗ trợ."""
-    extra = {}
-    if "seed" in _GENERATE_PARAMS:
-        extra["seed"] = GEN_SEED
-    if "class_temperature" in _GENERATE_PARAMS:
-        extra["class_temperature"] = 0.0
-    if "position_temperature" in _GENERATE_PARAMS:
-        extra["position_temperature"] = 0.0
-    return extra
+logger.info(f"Cố định giọng đọc bằng reseed thủ công (torch.manual_seed={GEN_SEED}).")
 
 
 def _reseed_rng():
-    """Phương án dự phòng khi model không có tham số seed riêng: tự đặt lại RNG toàn
-    cục ngay trước mỗi lần generate(), để cùng văn bản + cùng giọng luôn ra cùng kết quả."""
+    """Đặt lại RNG toàn cục ngay trước mỗi lần generate(), để cùng văn bản + cùng
+    giọng luôn ra cùng kết quả giữa các lần đọc."""
     torch.manual_seed(GEN_SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(GEN_SEED)
@@ -153,86 +136,48 @@ def _save_index(items):
     INDEX_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2))
 
 
-def _split_into_chunks(text: str, max_chars: int = CHUNK_MAX_CHARS):
-    """Tách văn bản thành các đoạn nhỏ theo câu, mỗi đoạn tối đa ~max_chars ký tự."""
-    sentences = re.split(r"(?<=[.!?…])\s+", text.strip())
-    chunks, buf = [], ""
-    for s in sentences:
-        s = s.strip()
-        if not s:
-            continue
-        if len(s) > max_chars:
-            # câu quá dài — cắt theo khoảng trắng
-            words = s.split(" ")
-            piece = ""
-            for w in words:
-                if len(piece) + len(w) + 1 > max_chars:
-                    if piece:
-                        chunks.append(piece.strip())
-                    piece = w
-                else:
-                    piece = (piece + " " + w).strip()
-            if piece:
-                s = piece
-            else:
-                continue
-        if len(buf) + len(s) + 1 <= max_chars:
-            buf = (buf + " " + s).strip()
-        else:
-            if buf:
-                chunks.append(buf)
-            buf = s
-    if buf:
-        chunks.append(buf)
-    return chunks or [text.strip()]
-
-
 def _run_job(job_id: str, text: str, profile_id: Optional[str]):
     job = JOBS[job_id]
     job["status"] = "running"
     logger.info(f"[{job_id}] Bắt đầu tạo giọng nói — {len(text)} ký tự, profile={profile_id or 'mặc định'}")
     try:
-        kwargs = _deterministic_kwargs()
+        kwargs = {}
         if profile_id:
             p = PROFILES_DIR / f"{profile_id}.pt"
             if not p.exists():
                 raise RuntimeError(f"Profile {profile_id} not found")
             kwargs["voice_clone_prompt"] = VoiceClonePrompt.load(str(p))
 
-        chunks = _split_into_chunks(text)
-        job["total"] = len(chunks)
+        job["total"] = 1
+        job["done"] = 0
 
         t0 = time.time()
-        pieces = []
-        gap = np.zeros(int(GAP_SECONDS * SR), dtype=np.float32)
-
         with GEN_LOCK:
-            _reseed_rng()  # chỉ reseed 1 lần đầu bài — để các đoạn trong cùng bài chảy liền mạch tự nhiên
-            for i, chunk in enumerate(chunks):
-                audio = MODEL.generate(text=chunk, **kwargs)
-                wav = audio[0]
-                if isinstance(wav, torch.Tensor):
-                    wav = wav.detach().cpu().float().numpy()
-                wav = np.asarray(wav, dtype=np.float32)
-                if wav.ndim == 2:
-                    wav = wav.T
-                    if wav.shape[1] == 1:
-                        wav = wav[:, 0]
-                pieces.append(wav)
-                if i < len(chunks) - 1:
-                    pieces.append(gap)
-                job["done"] = i + 1
+            _reseed_rng()
+            # Gọi 1 lần duy nhất với toàn bộ văn bản — model tự chia nhỏ nội bộ nếu
+            # dài (theo audio_chunk_duration/audio_chunk_threshold), giữ liên tục
+            # phong cách giữa các phần tốt hơn hẳn so với tự cắt đoạn rồi gọi rời rạc.
+            audio = MODEL.generate(text=text, **kwargs)
+        job["done"] = 1
+
+        wav = audio[0]
+        if isinstance(wav, torch.Tensor):
+            wav = wav.detach().cpu().float().numpy()
+        wav = np.asarray(wav, dtype=np.float32)
+        if wav.ndim == 2:
+            wav = wav.T
+            if wav.shape[1] == 1:
+                wav = wav[:, 0]
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        full = np.concatenate(pieces) if len(pieces) > 1 else pieces[0]
         buf = io.BytesIO()
-        sf.write(buf, full, SR, format="WAV", subtype="PCM_16")
+        sf.write(buf, wav, SR, format="WAV", subtype="PCM_16")
         job["audio_bytes"] = buf.getvalue()
         job["gen_time"] = time.time() - t0
         job["status"] = "done"
-        logger.info(f"[{job_id}] Xong trong {job['gen_time']:.2f}s ({len(chunks)} đoạn).")
+        logger.info(f"[{job_id}] Xong trong {job['gen_time']:.2f}s.")
     except Exception as e:
         job["status"] = "error"
         job["error"] = str(e)
@@ -261,14 +206,13 @@ async def generate(background_tasks: BackgroundTasks, text: str = Form(...), pro
     if _has_active_job():
         raise HTTPException(429, "Đang có một yêu cầu tạo giọng khác được xử lý, vui lòng đợi rồi thử lại.")
 
-    chunks = _split_into_chunks(text)
     job_id = uuid.uuid4().hex[:12]
-    JOBS[job_id] = {"status": "pending", "total": len(chunks), "done": 0,
+    JOBS[job_id] = {"status": "pending", "total": 1, "done": 0,
                      "audio_bytes": None, "gen_time": None, "error": None,
                      "created": time.time()}
-    logger.info(f"[{job_id}] Job mới — {word_count} từ, {len(chunks)} đoạn.")
+    logger.info(f"[{job_id}] Job mới — {word_count} từ.")
     background_tasks.add_task(_run_job, job_id, text, profile_id)
-    return {"job_id": job_id, "total_chunks": len(chunks)}
+    return {"job_id": job_id, "total_chunks": 1}
 
 
 @app.get("/generate/{job_id}/status")

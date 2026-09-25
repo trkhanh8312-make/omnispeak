@@ -87,6 +87,17 @@ def _validate_id(id_: str):
         raise HTTPException(400, "ID không hợp lệ")
 
 
+# Đã xác nhận qua test thực tế: ký tự xuống dòng thô (\n) trong văn bản dán vào
+# khiến OmniVoice đọc giật cục ngay tại điểm xuống dòng đó — gộp lại thành 1 đoạn
+# liền mạch (không xuống dòng) thì đọc mượt hẳn. Thay \n bằng khoảng trắng và gộp
+# khoảng trắng thừa trước khi đưa vào generate(), để không cần người dùng tự làm
+# thủ công mỗi lần dán văn bản có xuống dòng (vd copy từ Word/Google Docs).
+def _normalize_text(text: str) -> str:
+    text = re.sub(r"\s*[\r\n]+\s*", " ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
+
+
 app = FastAPI()
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -208,7 +219,7 @@ def health():
 @app.post("/generate")
 async def generate(background_tasks: BackgroundTasks, text: str = Form(...), profile_id: Optional[str] = Form(None)):
     _cleanup_jobs()
-    text = text.strip()
+    text = _normalize_text(text)
     if not text:
         raise HTTPException(400, "Văn bản trống")
 

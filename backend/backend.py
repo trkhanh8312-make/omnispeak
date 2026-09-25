@@ -16,6 +16,7 @@ import torch
 from fastapi import BackgroundTasks, FastAPI, Form, UploadFile, File, HTTPException
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
+
 from omnivoice import OmniVoice, VoiceClonePrompt
 
 DATA_DIR = Path(os.environ.get("OMNISPEAK_DATA_DIR", "/content/omnispeak_data"))
@@ -46,23 +47,33 @@ except Exception as e:
 # Giới hạn văn bản: người dùng thường dùng ~1000-2000 từ, chặn cứng ở 3000 từ.
 HARD_WORD_LIMIT = 3000
 SR = 24000
+
 # Văn bản dài: KHÔNG tự chia nhỏ ở tầng backend nữa — model OmniVoice đã có cơ chế
 # audio_chunk_duration/audio_chunk_threshold riêng để tự chia đoạn nội bộ khi cần,
 # và giữ liên tục phong cách giữa các đoạn tốt hơn nhiều so với việc mình tự cắt
 # theo câu rồi gọi generate() rời rạc từng đoạn (đó chính là nguyên nhân khiến
 # giọng đọc nghe khác tông giữa các phần của cùng 1 văn bản).
+#
+# Mặc định của model: audio_chunk_threshold=30s, audio_chunk_duration=15s. Đã thử
+# tăng 2 giá trị này lên (90/90) để giảm số lần chia đoạn nội bộ, nhưng lại gây
+# giật/nhảy cụt audio ngẫu nhiên (chunk quá dài không ổn định) — nên đã BỎ, quay
+# về đúng mặc định gốc của thư viện (không truyền audio_chunk_duration/threshold
+# vào generate() nữa) để cô lập xem giật cục có phải do bug #253 của model
+# (k2-fsa/OmniVoice, "skips/drops parts of the input text") hay không, độc lập
+# với việc tinh chỉnh chunk.
+GEN_NUM_STEP = int(os.environ.get("OMNISPEAK_NUM_STEP", "32"))  # mặc định thư viện
 
 # Giới hạn file mẫu giọng khi upload
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB
 MIN_REF_SECONDS = 0.5
 MAX_REF_SECONDS = 120
-PREVIEW_SECONDS = 8       # đoạn mẫu ngắn giữ lại để nghe thử trong thư viện
-MAX_PROFILES = 20         # giới hạn số giọng lưu trong thư viện
-NAME_MAX_LEN = 80         # giới hạn độ dài tên giọng nói
-REF_TEXT_MAX_LEN = 500    # giới hạn độ dài ref_text (transcript của mẫu giọng)
+PREVIEW_SECONDS = 8  # đoạn mẫu ngắn giữ lại để nghe thử trong thư viện
+MAX_PROFILES = 20  # giới hạn số giọng lưu trong thư viện
+NAME_MAX_LEN = 80  # giới hạn độ dài tên giọng nói
+REF_TEXT_MAX_LEN = 500  # giới hạn độ dài ref_text (transcript của mẫu giọng)
 
 # Dọn job cũ khỏi bộ nhớ
-JOB_RESULT_TTL = 30 * 60     # job đã xong nhưng không ai lấy audio -> xoá sau 30 phút
+JOB_RESULT_TTL = 30 * 60  # job đã xong nhưng không ai lấy audio -> xoá sau 30 phút
 JOB_STALE_TTL = 2 * 60 * 60  # job kẹt bất thường quá 2 tiếng -> xoá luôn (an toàn)
 
 # profile_id / job_id đều là uuid4().hex[:12] -> chỉ gồm hex 12 ký tự.
@@ -150,16 +161,21 @@ def _run_job(job_id: str, text: str, profile_id: Optional[str]):
 
         job["total"] = 1
         job["done"] = 0
-
         t0 = time.time()
+
         with GEN_LOCK:
             _reseed_rng()
             # Gọi 1 lần duy nhất với toàn bộ văn bản — model tự chia nhỏ nội bộ nếu
-            # dài (theo audio_chunk_duration/audio_chunk_threshold), giữ liên tục
-            # phong cách giữa các phần tốt hơn hẳn so với tự cắt đoạn rồi gọi rời rạc.
-            audio = MODEL.generate(text=text, **kwargs)
-        job["done"] = 1
+            # dài (theo audio_chunk_duration/audio_chunk_threshold mặc định của thư
+            # viện, không override), giữ liên tục phong cách giữa các phần tốt hơn
+            # hẳn so với tự cắt đoạn rồi gọi rời rạc.
+            audio = MODEL.generate(
+                text=text,
+                num_step=GEN_NUM_STEP,
+                **kwargs,
+            )
 
+        job["done"] = 1
         wav = audio[0]
         if isinstance(wav, torch.Tensor):
             wav = wav.detach().cpu().float().numpy()
@@ -195,14 +211,17 @@ async def generate(background_tasks: BackgroundTasks, text: str = Form(...), pro
     text = text.strip()
     if not text:
         raise HTTPException(400, "Văn bản trống")
+
     word_count = len(text.split())
     if word_count > HARD_WORD_LIMIT:
         raise HTTPException(413, f"Văn bản vượt quá {HARD_WORD_LIMIT} từ (hiện tại: {word_count} từ)")
+
     if profile_id:
         _validate_id(profile_id)
         p = PROFILES_DIR / f"{profile_id}.pt"
         if not p.exists():
             raise HTTPException(404, f"Profile {profile_id} not found")
+
     if _has_active_job():
         raise HTTPException(429, "Đang có một yêu cầu tạo giọng khác được xử lý, vui lòng đợi rồi thử lại.")
 
@@ -268,6 +287,7 @@ async def create_profile(name: str = Form(...), kind: str = Form("clone"),
     existing = next((p for p in items if p["name"] == name), None)
     if existing:
         return existing
+
     if len(items) >= MAX_PROFILES:
         raise HTTPException(429, f"Thư viện đã đạt giới hạn {MAX_PROFILES} giọng nói — hãy xoá bớt giọng cũ trước khi thêm mới.")
 
@@ -287,6 +307,7 @@ async def create_profile(name: str = Form(...), kind: str = Form("clone"),
             info = sf.info(str(tmp))
         except Exception:
             raise HTTPException(400, "File mẫu không phải audio hợp lệ (thử .wav, .mp3, .m4a...)")
+
         if info.duration < MIN_REF_SECONDS:
             raise HTTPException(400, f"Mẫu giọng quá ngắn ({info.duration:.1f}s) — cần ít nhất {MIN_REF_SECONDS}s")
         if info.duration > MAX_REF_SECONDS:

@@ -48,20 +48,11 @@ except Exception as e:
 HARD_WORD_LIMIT = 3000
 SR = 24000
 
-# Văn bản dài: KHÔNG tự chia nhỏ ở tầng backend nữa — model OmniVoice đã có cơ chế
-# audio_chunk_duration/audio_chunk_threshold riêng để tự chia đoạn nội bộ khi cần,
-# và giữ liên tục phong cách giữa các đoạn tốt hơn nhiều so với việc mình tự cắt
-# theo câu rồi gọi generate() rời rạc từng đoạn (đó chính là nguyên nhân khiến
-# giọng đọc nghe khác tông giữa các phần của cùng 1 văn bản).
-#
-# Mặc định của model: audio_chunk_threshold=30s, audio_chunk_duration=15s. Đã thử
-# tăng 2 giá trị này lên (90/90) để giảm số lần chia đoạn nội bộ, nhưng lại gây
-# giật/nhảy cụt audio ngẫu nhiên (chunk quá dài không ổn định) — nên đã BỎ, quay
-# về đúng mặc định gốc của thư viện (không truyền audio_chunk_duration/threshold
-# vào generate() nữa) để cô lập xem giật cục có phải do bug #253 của model
-# (k2-fsa/OmniVoice, "skips/drops parts of the input text") hay không, độc lập
-# với việc tinh chỉnh chunk.
+# Không tự chia nhỏ văn bản ở tầng backend — model OmniVoice tự chia đoạn nội bộ
+# khi cần (dùng mặc định của thư viện: audio_chunk_threshold=30s, audio_chunk_duration=15s)
+# và giữ liên tục phong cách tốt hơn tự cắt câu rồi gọi generate() rời rạc.
 GEN_NUM_STEP = int(os.environ.get("OMNISPEAK_NUM_STEP", "32"))  # mặc định thư viện
+GEN_SPEED = float(os.environ.get("OMNISPEAK_SPEED", "1.0"))  # >1.0 nhanh hơn, <1.0 chậm hơn (mặc định thư viện: 1.0)
 
 # Giới hạn file mẫu giọng khi upload
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB
@@ -87,11 +78,8 @@ def _validate_id(id_: str):
         raise HTTPException(400, "ID không hợp lệ")
 
 
-# Đã xác nhận qua test thực tế: ký tự xuống dòng thô (\n) trong văn bản dán vào
-# khiến OmniVoice đọc giật cục ngay tại điểm xuống dòng đó — gộp lại thành 1 đoạn
-# liền mạch (không xuống dòng) thì đọc mượt hẳn. Thay \n bằng khoảng trắng và gộp
-# khoảng trắng thừa trước khi đưa vào generate(), để không cần người dùng tự làm
-# thủ công mỗi lần dán văn bản có xuống dòng (vd copy từ Word/Google Docs).
+# \n thô trong văn bản dán vào khiến OmniVoice đọc giật cục tại điểm xuống dòng —
+# thay bằng khoảng trắng và gộp khoảng trắng thừa trước khi đưa vào generate().
 def _normalize_text(text: str) -> str:
     text = re.sub(r"\s*[\r\n]+\s*", " ", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
@@ -107,12 +95,9 @@ MODEL = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device_map=device, dtype=d
 logger.info("Model đã sẵn sàng.")
 
 # ---- Cố định giọng đọc giữa các lần gọi ----
-# Đã xác nhận qua mã nguồn thật: OmniVoiceGenerationConfig không có tham số "seed" nào
-# cả — chỉ có class_temperature (mặc định 0.0, đã là greedy) và position_temperature
-# (mặc định 5.0, dùng nhiễu Gumbel — tác giả khuyến nghị giữ nguyên giá trị này để
-# không giảm chất lượng âm thanh). Vì vậy cách duy nhất để cố định kết quả là tự đặt
-# lại RNG toàn cục (torch/numpy) ngay trước mỗi lần gọi — đã test và xác nhận hoạt
-# động đúng (hash trùng khớp giữa các lần đọc cùng văn bản + cùng giọng).
+# OmniVoiceGenerationConfig không có tham số "seed" — chỉ có class_temperature
+# (mặc định 0.0, greedy) và position_temperature (mặc định 5.0, dùng nhiễu Gumbel).
+# Nên tự reseed RNG toàn cục (torch/numpy) trước mỗi lần generate() để cố định kết quả.
 GEN_SEED = int(os.environ.get("OMNISPEAK_SEED", "42"))
 logger.info(f"Cố định giọng đọc bằng reseed thủ công (torch.manual_seed={GEN_SEED}).")
 
@@ -177,12 +162,11 @@ def _run_job(job_id: str, text: str, profile_id: Optional[str]):
         with GEN_LOCK:
             _reseed_rng()
             # Gọi 1 lần duy nhất với toàn bộ văn bản — model tự chia nhỏ nội bộ nếu
-            # dài (theo audio_chunk_duration/audio_chunk_threshold mặc định của thư
-            # viện, không override), giữ liên tục phong cách giữa các phần tốt hơn
-            # hẳn so với tự cắt đoạn rồi gọi rời rạc.
+            # dài, giữ liên tục phong cách tốt hơn tự cắt đoạn rồi gọi rời rạc.
             audio = MODEL.generate(
                 text=text,
                 num_step=GEN_NUM_STEP,
+                speed=GEN_SPEED,
                 **kwargs,
             )
 
